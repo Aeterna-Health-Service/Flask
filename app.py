@@ -3,6 +3,7 @@ from flask_cors import CORS
 from config import Config
 from routes import api_bp
 import logging
+import os
 
 # 로깅 설정
 logging.basicConfig(
@@ -16,9 +17,11 @@ def create_app():
     app.config.from_object(Config)
     
     # CORS 설정 (Spring 서버와 통신을 위해)
+    # 환경 변수에서 허용할 오리진 가져오기 (기본값: localhost)
+    allowed_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080').split(',')
     CORS(app, resources={
         r"/api/*": {
-            "origins": ["http://localhost:8080", "http://127.0.0.1:8080"],
+            "origins": allowed_origins,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"]
         }
@@ -46,4 +49,6 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.getenv('PORT', 5000))
+    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=port, debug=debug)

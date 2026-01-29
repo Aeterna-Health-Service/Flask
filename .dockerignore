@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 테스트 및 로그
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 업로드 파일 (컨테이너 내에서 생성됨)
+uploads/*
+!uploads/.gitkeep
+
+# 테스트 이미지
+test_images/
+
+# 환경 변수 파일 (런타임에 주입)
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# 기타
+.DS_Store
+*.md
+!README.md
+
