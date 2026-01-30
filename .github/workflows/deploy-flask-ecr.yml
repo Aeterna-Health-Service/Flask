@@ -57,7 +57,10 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        id: ecr-login
         uses: aws-actions/amazon-ecr-login@v1
+        # amazon-ecr-login 액션이 자동으로 Docker 로그인을 설정합니다
+        # 별도의 docker login 명령어가 필요 없습니다
 
       - name: Build Docker image (Flask)
         run: |
@@ -82,8 +85,11 @@ jobs:
             
             # ECR 로그인 (IAM 역할이 있다면 자동 인증)
             echo "ECR 로그인 중..."
-            aws ecr get-login-password --region ap-northeast-2 | \
-              docker login --username AWS --password-stdin ${{ env.ECR_REPOSITORY }} || true
+            # 비밀번호를 환경 변수로 받아서 마스킹 처리
+            ECR_PASSWORD=$(aws ecr get-login-password --region ap-northeast-2)
+            echo "::add-mask::$ECR_PASSWORD"
+            echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin ${{ env.ECR_REPOSITORY }} || true
+            unset ECR_PASSWORD
             
             # 이전 이미지 백업
             echo "이전 이미지 백업..."
