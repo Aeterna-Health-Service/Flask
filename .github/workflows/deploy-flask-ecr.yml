@@ -59,23 +59,49 @@ jobs:
       - name: Login to Amazon ECR
         id: ecr-login
         run: |
+          set -e
+          echo "ECR 로그인 시작..."
           # ECR 비밀번호를 가져와서 마스킹 처리
           ECR_PASSWORD=$(aws ecr get-login-password --region ${{ secrets.AWS_REGION }})
+          if [ -z "$ECR_PASSWORD" ]; then
+            echo "❌ ECR 비밀번호를 가져오는데 실패했습니다."
+            exit 1
+          fi
           echo "::add-mask::$ECR_PASSWORD"
           # ECR 레지스트리 URI 추출 (예: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com)
           ECR_REGISTRY=$(echo ${{ env.ECR_REPOSITORY }} | cut -d'/' -f1)
+          echo "ECR 레지스트리: $ECR_REGISTRY"
           echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin $ECR_REGISTRY
+          if [ $? -eq 0 ]; then
+            echo "✅ ECR 로그인 성공"
+          else
+            echo "❌ ECR 로그인 실패"
+            exit 1
+          fi
           unset ECR_PASSWORD
 
       - name: Build Docker image (Flask)
         run: |
+          set -e
+          echo "Docker 이미지 빌드 시작..."
+          echo "ECR 레포지토리: ${{ env.ECR_REPOSITORY }}"
+          echo "이미지 태그: ${{ env.IMAGE_TAG }}"
+          if [ ! -f "Dockerfile" ]; then
+            echo "❌ Dockerfile을 찾을 수 없습니다. 현재 디렉토리: $(pwd)"
+            ls -la
+            exit 1
+          fi
           docker build -t ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
           docker tag ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} ${{ env.ECR_REPOSITORY }}:latest
+          echo "✅ Docker 이미지 빌드 완료"
 
       - name: Push Docker image to ECR
         run: |
+          set -e
+          echo "ECR에 이미지 푸시 시작..."
           docker push ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           docker push ${{ env.ECR_REPOSITORY }}:latest
+          echo "✅ 이미지 푸시 완료"
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v0.1.7
