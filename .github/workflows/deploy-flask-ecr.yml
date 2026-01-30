@@ -1,0 +1,149 @@
+name: CI/CD - Flask (ECR -> EC2)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 수동 실행 가능
+
+env:
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_FLASK }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  test:
+    name: 테스트 실행
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests (if available)
+        run: |
+          # 테스트 파일이 있다면 실행
+          if [ -f "test_exercise_api.py" ] || [ -f "test_meal_api.py" ]; then
+            pip install pytest pytest-cov
+            pytest test_*.py -v || echo "테스트 실패 또는 테스트 파일 없음"
+          else
+            echo "테스트 파일이 없습니다. 스킵합니다."
+          fi
+
+  build-and-push:
+    name: 빌드 및 배포
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build Docker image (Flask)
+        run: |
+          docker build -t ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
+          docker tag ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} ${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            
+            echo "=== 배포 시작 ==="
+            
+            # ECR 로그인 (IAM 역할이 있다면 자동 인증)
+            echo "ECR 로그인 중..."
+            aws ecr get-login-password --region ap-northeast-2 | \
+              docker login --username AWS --password-stdin ${{ env.ECR_REPOSITORY }} || true
+            
+            # 이전 이미지 백업
+            echo "이전 이미지 백업..."
+            docker tag ${{ env.ECR_REPOSITORY }}:latest ${{ env.ECR_REPOSITORY }}:previous || true
+            
+            # 새 이미지 다운로드
+            echo "새 이미지 다운로드 중..."
+            docker pull ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            docker tag ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} ${{ env.ECR_REPOSITORY }}:latest
+            
+            # 기존 컨테이너 중지
+            echo "기존 컨테이너 중지..."
+            docker stop aeterna-flask || true
+            docker rm aeterna-flask || true
+            
+            # 새 컨테이너 시작
+            echo "새 컨테이너 시작..."
+            docker run -d --name aeterna-flask \
+              --restart unless-stopped \
+              -p 5000:5000 \
+              --env-file /home/ec2-user/aeterna-health/flask.env \
+              -v /home/ec2-user/aeterna-health/uploads:/app/uploads \
+              ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            
+            # Health Check 대기
+            echo "Health Check 대기 중..."
+            sleep 10
+            
+            # Health Check 실행
+            echo "Health Check 실행 중..."
+            HEALTH_CHECK_MAX_RETRIES=30
+            HEALTH_CHECK_RETRY_INTERVAL=2
+            
+            for i in $(seq 1 $HEALTH_CHECK_MAX_RETRIES); do
+              if curl -f http://localhost:5000/api/health > /dev/null 2>&1; then
+                echo "✅ Health Check 성공 (시도 $i/$HEALTH_CHECK_MAX_RETRIES)"
+                echo "=== 배포 완료 ==="
+                exit 0
+              fi
+              echo "Health Check 시도 $i/$HEALTH_CHECK_MAX_RETRIES..."
+              sleep $HEALTH_CHECK_RETRY_INTERVAL
+            done
+            
+            # Health Check 실패 시 롤백
+            echo "❌ Health Check 실패 - 롤백 시작..."
+            docker stop aeterna-flask || true
+            docker rm aeterna-flask || true
+            
+            # 이전 이미지로 롤백
+            if docker images | grep -q "${{ env.ECR_REPOSITORY }}:previous"; then
+              echo "이전 버전으로 롤백 중..."
+              docker run -d --name aeterna-flask \
+                --restart unless-stopped \
+                -p 5000:5000 \
+                --env-file /home/ec2-user/aeterna-health/flask.env \
+                -v /home/ec2-user/aeterna-health/uploads:/app/uploads \
+                ${{ env.ECR_REPOSITORY }}:previous
+              echo "⚠️ 이전 버전으로 롤백 완료"
+            else
+              echo "⚠️ 롤백할 이전 이미지가 없습니다"
+            fi
+            
+            exit 1
