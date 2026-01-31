@@ -1,8 +1,6 @@
 from flask import Blueprint, request, jsonify
-import os
 from services.food_analysis_service import FoodAnalysisService
-from utils.file_validator import validate_image_file
-from utils.exceptions import FoodAnalysisError, InvalidImageError
+from utils.exceptions import FoodAnalysisError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +24,7 @@ def analyze_food_name():
     음식 사진을 받아 음식 이름만 반환하는 API
     
     Request Body:
-        - image_path: str (로컬 파일 경로)
+        - image_url: str (이미지 URL)
     
     Returns:
         - food_name: str
@@ -34,28 +32,17 @@ def analyze_food_name():
     try:
         data = request.get_json()
         
-        if not data or 'image_path' not in data:
+        if not data or 'image_url' not in data:
             return jsonify({
                 'success': False,
-                'error': 'image_path가 필요합니다.'
+                'error': 'image_url이 필요합니다.'
             }), 400
         
-        image_path = data['image_path']
-        
-        # 파일 존재 확인
-        if not os.path.exists(image_path):
-            return jsonify({
-                'success': False,
-                'error': f'파일을 찾을 수 없습니다: {image_path}'
-            }), 404
-        
-        # 이미지 파일 검증
-        if not validate_image_file(image_path):
-            raise InvalidImageError('지원하지 않는 이미지 형식입니다.')
+        image_url = data['image_url']
         
         # 음식 이름 분석
         food_service = get_food_service()
-        result = food_service.analyze_food_name(image_path)
+        result = food_service.analyze_food_name(image_url)
         
         return jsonify({
             'success': True,
@@ -82,7 +69,7 @@ def analyze_food_nutrition():
     음식 사진을 받아 음식 이름, 칼로리, 탄단지 비율을 반환하는 API
     
     Request Body:
-        - image_path: str (로컬 파일 경로)
+        - image_url: str (이미지 URL)
     
     Returns:
         - food_name: str
@@ -95,28 +82,17 @@ def analyze_food_nutrition():
     try:
         data = request.get_json()
         
-        if not data or 'image_path' not in data:
+        if not data or 'image_url' not in data:
             return jsonify({
                 'success': False,
-                'error': 'image_path가 필요합니다.'
+                'error': 'image_url이 필요합니다.'
             }), 400
         
-        image_path = data['image_path']
-        
-        # 파일 존재 확인
-        if not os.path.exists(image_path):
-            return jsonify({
-                'success': False,
-                'error': f'파일을 찾을 수 없습니다: {image_path}'
-            }), 404
-        
-        # 이미지 파일 검증
-        if not validate_image_file(image_path):
-            raise InvalidImageError('지원하지 않는 이미지 형식입니다.')
+        image_url = data['image_url']
         
         # 음식 영양 정보 분석
         food_service = get_food_service()
-        result = food_service.analyze_food_nutrition(image_path)
+        result = food_service.analyze_food_nutrition(image_url)
         
         return jsonify({
             'success': True,

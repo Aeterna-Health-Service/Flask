@@ -4,6 +4,7 @@ import base64
 from PIL import Image
 import io
 import logging
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +15,12 @@ class FoodAnalysisService:
     def __init__(self):
         self.ai_service = AIService()
     
-    def analyze_food_name(self, image_path: str) -> str:
+    def analyze_food_name(self, image_url: str) -> str:
         """
         음식 사진에서 음식 이름만 추출
         
         Args:
-            image_path: 이미지 파일 경로
+            image_url: 이미지 URL
             
         Returns:
             음식 이름 (한국어)
@@ -30,7 +31,7 @@ class FoodAnalysisService:
         """
         try:
             # 이미지를 base64로 인코딩
-            image_base64 = self._encode_image(image_path)
+            image_base64 = self._encode_image(image_url)
             
             # AI 서비스를 통해 음식 이름 분석
             prompt = """이 이미지에 있는 음식을 분석해주세요. 
@@ -49,12 +50,12 @@ class FoodAnalysisService:
                 raise
             raise AIServiceError(f"음식 이름 분석 중 오류 발생: {str(e)}")
     
-    def analyze_food_nutrition(self, image_path: str) -> dict:
+    def analyze_food_nutrition(self, image_url: str) -> dict:
         """
         음식 사진에서 음식 이름, 칼로리, 탄단지 비율 추출
         
         Args:
-            image_path: 이미지 파일 경로
+            image_url: 이미지 URL
             
         Returns:
             {
@@ -73,7 +74,7 @@ class FoodAnalysisService:
         """
         try:
             # 이미지를 base64로 인코딩
-            image_base64 = self._encode_image(image_path)
+            image_base64 = self._encode_image(image_url)
             
             # AI 서비스를 통해 영양 정보 분석
             prompt = """이 이미지에 있는 음식을 분석해주세요.
@@ -136,40 +137,45 @@ class FoodAnalysisService:
                 raise
             raise AIServiceError(f"영양 정보 분석 중 오류 발생: {str(e)}")
     
-    def _encode_image(self, image_path: str) -> str:
+    def _encode_image(self, image_url: str) -> str:
         """
-        이미지 파일을 base64로 인코딩
+        이미지 URL을 base64로 인코딩
         
         Args:
-            image_path: 이미지 파일 경로
+            image_url: 이미지 URL
             
         Returns:
             base64 인코딩된 이미지 문자열
         """
         try:
-            with open(image_path, 'rb') as image_file:
-                # 이미지 파일 읽기
-                image_data = image_file.read()
+            # URL에서 이미지 다운로드
+            logger.info(f"이미지 URL에서 다운로드: {image_url}")
+            response = requests.get(image_url, timeout=30)
+            response.raise_for_status()
+            image_data = response.content
+            
+            # PIL로 이미지 검증 및 최적화
+            image = Image.open(io.BytesIO(image_data))
+            
+            # 이미지 크기 조정 (너무 큰 경우)
+            max_size = (1024, 1024)
+            if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
+                image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            
+            # JPEG로 변환하여 크기 최적화
+            output = io.BytesIO()
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image.save(output, format='JPEG', quality=85)
+            image_data = output.getvalue()
+            
+            # base64 인코딩
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            return base64_image
                 
-                # PIL로 이미지 검증 및 최적화
-                image = Image.open(io.BytesIO(image_data))
-                
-                # 이미지 크기 조정 (너무 큰 경우)
-                max_size = (1024, 1024)
-                if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
-                    image.thumbnail(max_size, Image.Resampling.LANCZOS)
-                
-                # JPEG로 변환하여 크기 최적화
-                output = io.BytesIO()
-                if image.mode != 'RGB':
-                    image = image.convert('RGB')
-                image.save(output, format='JPEG', quality=85)
-                image_data = output.getvalue()
-                
-                # base64 인코딩
-                base64_image = base64.b64encode(image_data).decode('utf-8')
-                return base64_image
-                
+        except requests.RequestException as e:
+            logger.error(f"이미지 URL 다운로드 실패: {str(e)}")
+            raise ImageProcessingError(f"이미지 URL에서 다운로드할 수 없습니다: {str(e)}")
         except Exception as e:
             logger.error(f"이미지 인코딩 실패: {str(e)}")
-            raise ImageProcessingError(f"이미지 파일을 읽을 수 없습니다: {str(e)}")
+            raise ImageProcessingError(f"이미지 처리 중 오류가 발생했습니다: {str(e)}")
